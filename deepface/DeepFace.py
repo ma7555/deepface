@@ -350,7 +350,9 @@ def analyze(img_path, actions=[], models={}, enforce_detection=True, detector_ba
 	else:
 		img_paths = [img_path]
 		bulkProcess = False
-
+	
+	if detector_backend == 'mtcnn':
+		functions.load_mtcnn()
 	#---------------------------------
 
 	#if a specific target is not passed, then find them all
@@ -528,6 +530,9 @@ def find(img_path, db_path, model_name ='VGG-Face', distance_metric = 'cosine', 
 		bulkProcess = False
 		img_paths = [img_path]
 	
+	if detector_backend == 'mtcnn':
+		functions.load_mtcnn()
+
 	if os.path.isdir(db_path) == True:
 		
 		#---------------------------------------
