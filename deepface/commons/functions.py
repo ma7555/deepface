@@ -1,24 +1,21 @@
 import os
 import numpy as np
 import pandas as pd
-from keras.preprocessing.image import load_img, save_img, img_to_array
-from keras.applications.imagenet_utils import preprocess_input
-from keras.preprocessing import image
+from tensorflow.keras.preprocessing import image
 import cv2
 from pathlib import Path
 import gdown
-import hashlib
 import math
 from PIL import Image
-import copy
 import base64
-import multiprocessing
 import subprocess
 import tensorflow as tf
 import keras
 import bz2
 from deepface.commons import distance
 from mtcnn import MTCNN #0.1.0
+import time
+import sys
 
 def load_mtcnn():
 	global mtcnn_detector
@@ -92,7 +89,7 @@ def load_image(img):
 	
 	return img
 	
-def detect_face(img, detector_backend = 'opencv', grayscale = False, enforce_detection = True):
+def detect_face(img, detector_backend='opencv', grayscale=False, enforce_detection=True):
 	
 	home = str(Path.home())
 	
@@ -264,7 +261,7 @@ def detect_face(img, detector_backend = 'opencv', grayscale = False, enforce_det
 	else:
 		detectors = ['opencv', 'ssd', 'dlib', 'mtcnn']
 		raise ValueError("Valid backends are ", detectors," but you passed ", detector_backend)
-	
+
 	return 0
 
 def alignment_procedure(img, left_eye, right_eye):
@@ -314,7 +311,7 @@ def alignment_procedure(img, left_eye, right_eye):
 	
 	return img #return img anyway
 	
-def align_face(img, detector_backend = 'opencv'):
+def align_face(img, detector_backend='opencv'):
 	
 	home = str(Path.home())
 	
@@ -414,24 +411,23 @@ def align_face(img, detector_backend = 'opencv'):
 				
 		return img #return img anyway
 	
-def preprocess_face(img, target_size=(224, 224), grayscale = False, enforce_detection = True, detector_backend = 'opencv'):
-	
+def preprocess_face(img, target_size=(224, 224), grayscale=False, enforce_detection=True, detector_backend='opencv'):
+	tic = time.time()
 	#img might be path, base64 or numpy array. Convert it to numpy whatever it is.
 	img = load_image(img)
 	base_img = img.copy()
 	
-	img = detect_face(img = img, detector_backend = detector_backend, grayscale = grayscale, enforce_detection = enforce_detection)
-	
+	img = detect_face(img=img, detector_backend=detector_backend, grayscale=grayscale, enforce_detection=enforce_detection)
+	print(time.time()-tic, file=sys.stdout)
+
 	#--------------------------
 	
 	if img.shape[0] > 0 and img.shape[1] > 0:
-		img = align_face(img = img, detector_backend = detector_backend)
+		img = align_face(img=img, detector_backend=detector_backend)
+	elif not enforce_detection: #restore base image if no faces found and enforce_detection is false
+		img = base_img.copy()
 	else:
-		
-		if enforce_detection == True:
-			raise ValueError("Detected face shape is ", img.shape,". Consider to set enforce_detection argument to False.")
-		else: #restore base image 
-			img = base_img.copy()
+		raise ValueError("Detected face shape is ", img.shape,". Consider to set enforce_detection argument to False.")
 		
 	#--------------------------
 	
@@ -441,8 +437,8 @@ def preprocess_face(img, target_size=(224, 224), grayscale = False, enforce_dete
 		
 	img = cv2.resize(img, target_size)
 	img_pixels = image.img_to_array(img)
-	img_pixels = np.expand_dims(img_pixels, axis = 0)
-	img_pixels /= 255 #normalize input in [0, 1]
+	img_pixels = np.expand_dims(img_pixels, axis=0)
+	img_pixels /= 255.0 #normalize input in [0, 1]
 	
 	return img_pixels
 	

@@ -11,23 +11,38 @@ import pandas as pd
 from tqdm import tqdm
 import json
 import pickle
+from joblib import Parallel, delayed
 
 from deepface.basemodels import VGGFace, OpenFace, Facenet, FbDeepFace, DeepID
 from deepface.extendedmodels import Age, Gender, Race, Emotion
 from deepface.commons import functions, realtime, distance as dst
 
+# this is not a must because it is very huge.		
 def DlibResNet_():
 	from deepface.basemodels.DlibResNet import DlibResNet
 	return DlibResNet()
 
-def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='cosine', 
-		   model=None, enforce_detection=True, detector_backend = 'opencv'):
+def ensemble_builder():
+	pass
 
-	# this is not a must because it is very huge.		
+
+models_loader = {
+		'VGG-Face': VGGFace.loadModel, 
+		'OpenFace': OpenFace.loadModel,
+		'Facenet': Facenet.loadModel,
+		'DeepFace': FbDeepFace.loadModel,
+		'DeepID': DeepID.loadModel,
+		'Dlib': DlibResNet_,
+		'Ensemble': ensemble_builder
+		}
+
+def verify(img1_path, img2_path = '', model_name='VGG-Face', 
+			distance_metric='cosine', model=None, enforce_detection=True, 
+			detector_backend = 'opencv'):
 
 	tic = time.time()
 
-	if type(img1_path) == list:
+	if isinstance(img1_path, list):
 		bulkProcess = True
 		img_list = img1_path.copy()
 	else:
@@ -44,9 +59,9 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 	if model_name == 'Ensemble':
 		print("Ensemble learning enabled")
 		
-		import lightgbm as lgb #lightgbm==2.3.1
+		import lightgbm as lgb
 		
-		if model == None:
+		if model is None:
 			model = {}
 			
 			model_pbar = tqdm(range(0, 4), desc='Face recognition models')
@@ -55,16 +70,16 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 				
 				if index == 0:
 					model_pbar.set_description("Loading VGG-Face")
-					model["VGG-Face"] = VGGFace.loadModel()
+					model["VGG-Face"] = models_loader["VGG-Face"]()
 				elif index == 1:
 					model_pbar.set_description("Loading Google FaceNet")
-					model["Facenet"] = Facenet.loadModel()
+					model["Facenet"] = models_loader["Facenet"]()
 				elif index == 2:
 					model_pbar.set_description("Loading OpenFace")
-					model["OpenFace"] = OpenFace.loadModel()
+					model["OpenFace"] = models_loader["OpenFace"]()
 				elif index == 3:
 					model_pbar.set_description("Loading Facebook DeepFace")
-					model["DeepFace"] = FbDeepFace.loadModel()
+					model["DeepFace"] = models_loader["DeepFace"]()
 					
 		#--------------------------
 		#validate model dictionary because it might be passed from input as pre-trained
@@ -83,7 +98,7 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 		model_names = ["VGG-Face", "Facenet", "OpenFace", "DeepFace"]
 		metrics = ["cosine", "euclidean", "euclidean_l2"]
 		
-		pbar = tqdm(range(0,len(img_list)), desc='Verification')
+		pbar = tqdm(range(0, len(img_list)), desc='Verification')
 		
 		#for instance in img_list:
 		for index in pbar:
@@ -108,11 +123,11 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 						input_shape = input_shape[1:3]
 					
 					
-					img1 = functions.preprocess_face(img = img1_path, target_size = input_shape, enforce_detection = enforce_detection, detector_backend = detector_backend)
-					img2 = functions.preprocess_face(img = img2_path, target_size = input_shape, enforce_detection = enforce_detection, detector_backend = detector_backend)
+					img1 = functions.preprocess_face(img=img1_path, target_size=input_shape, enforce_detection=enforce_detection, detector_backend=detector_backend)
+					img2 = functions.preprocess_face(img=img2_path, target_size=input_shape, enforce_detection=enforce_detection, detector_backend=detector_backend)
 					
-					img1_representation = custom_model.predict(img1)[0,:]
-					img2_representation = custom_model.predict(img2)[0,:]
+					both_imgs = np.vstack([img1, img2])
+					img1_representation, img2_representation = custom_model.predict(both_imgs)
 					
 					for j in metrics:
 						if j == 'cosine':
@@ -121,11 +136,12 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 							distance = dst.findEuclideanDistance(img1_representation, img2_representation)
 						elif j == 'euclidean_l2':
 							distance = dst.findEuclideanDistance(dst.l2_normalize(img1_representation), dst.l2_normalize(img2_representation))
+						else:
+							raise ValueError('Only cosine, euclidean and euclidean_l2 are supported as a metric but {} was passed'.format(j))
 						
 						if i == 'OpenFace' and j == 'euclidean': #this returns same with OpenFace - euclidean_l2
 							continue
 						else:
-							
 							ensemble_features.append(distance)
 							
 							if len(ensemble_features) > 1:
@@ -203,26 +219,17 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 	#--------------------------------
 	#ensemble learning disabled
 	
-	if model == None:
-
-		models = {
-				'VGG-Face': VGGFace.loadModel, 
-				'OpenFace': OpenFace.loadModel,
-				'Facenet': Facenet.loadModel,
-				'DeepFace': FbDeepFace.loadModel,
-				'DeepID': DeepID.loadModel,
-				'Dlib': DlibResNet_
-				}
-
-		model = models.get(model_name)
+	if model is None:
+		model = models_loader.get(model_name)
 		if model:
 			model = model()
 			print('Using {} model backend and {} distance'.format(model_name, distance_metric))
 		else:
 			raise ValueError('Invalid model_name passed - {}'.format(model_name))
 	
-	else: #model != None
-		print("Already built model is passed")
+	else:
+		pass
+		# print("Already built model is passed")
 
 	#------------------------------
 	#face recognition models have different size of inputs
@@ -234,13 +241,12 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 	else: #keras based models
 		input_shape = model.layers[0].input_shape
 		
-		if type(input_shape) == list:
+		if isinstance(input_shape, list):
 			input_shape = input_shape[0][1:3]
 		else:
 			input_shape = input_shape[1:3]
 	  
-	input_shape_x = input_shape[0]
-	input_shape_y = input_shape[1]
+	input_shape_x, input_shape_y = input_shape
 
 	#------------------------------
 
@@ -252,28 +258,24 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 	#calling deepface in a for loop causes lots of progress bars. this prevents it.
 	disable_option = False if len(img_list) > 1 else True
 	
-	pbar = tqdm(range(0,len(img_list)), desc='Verification', disable = disable_option)
-	
+	pbar = tqdm(range(0,len(img_list)), desc='Verification', disable=disable_option)
+
 	#for instance in img_list:
 	for index in pbar:
 	
 		instance = img_list[index]
 		
-		if type(instance) == list and len(instance) >= 2:
-			img1_path = instance[0]
-			img2_path = instance[1]
-
+		if isinstance(instance, list) and len(instance) == 2:
+			img1_path, img2_path = instance
 			#----------------------
 			#crop and align faces
-
-			img1 = functions.preprocess_face(img=img1_path, target_size=(input_shape_y, input_shape_x), enforce_detection = enforce_detection, detector_backend = detector_backend)
-			img2 = functions.preprocess_face(img=img2_path, target_size=(input_shape_y, input_shape_x), enforce_detection = enforce_detection, detector_backend = detector_backend)
-
+			# img1, img2 = Parallel(n_jobs=2)(delayed(functions.preprocess_face)(img=img_path, target_size=(input_shape_y, input_shape_x), enforce_detection=enforce_detection, detector_backend=detector_backend) for img_path in (img1_path, img2_path))
+			img1 = functions.preprocess_face(img=img1_path, target_size=(input_shape_y, input_shape_x), enforce_detection=enforce_detection, detector_backend=detector_backend)
+			img2 = functions.preprocess_face(img=img2_path, target_size=(input_shape_y, input_shape_x), enforce_detection=enforce_detection, detector_backend=detector_backend)
 			#----------------------
 			#find embeddings
-
-			img1_representation = model.predict(img1)[0,:]
-			img2_representation = model.predict(img2)[0,:]
+			both_imgs = np.vstack([img1, img2])
+			img1_representation, img2_representation = model.predict(both_imgs)
 
 			#----------------------
 			#find distances between embeddings
@@ -283,7 +285,8 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 			elif distance_metric == 'euclidean':
 				distance = dst.findEuclideanDistance(img1_representation, img2_representation)
 			elif distance_metric == 'euclidean_l2':
-				distance = dst.findEuclideanDistance(dst.l2_normalize(img1_representation), dst.l2_normalize(img2_representation))
+				distance = dst.findEuclideanDistance(dst.l2_normalize(img1_representation), 
+													 dst.l2_normalize(img2_representation))
 			else:
 				raise ValueError("Invalid distance_metric passed - ", distance_metric)
 
@@ -339,7 +342,7 @@ def verify(img1_path, img2_path = '', model_name='VGG-Face', distance_metric='co
 		return resp_obj
 		#return resp_objects
 
-def analyze(img_path, actions = [], models = {}, enforce_detection = True, detector_backend = 'opencv'):
+def analyze(img_path, actions=[], models={}, enforce_detection=True, detector_backend='opencv'):
 
 	if type(img_path) == list:
 		img_paths = img_path.copy()
@@ -529,7 +532,7 @@ def find(img_path, db_path, model_name ='VGG-Face', distance_metric = 'cosine', 
 		
 		#---------------------------------------
 		
-		if model == None:
+		if model is None:
 			if model_name == 'VGG-Face':
 				print("Using VGG-Face model backend and", distance_metric,"distance.")
 				model = VGGFace.loadModel()
@@ -553,7 +556,7 @@ def find(img_path, db_path, model_name ='VGG-Face', distance_metric = 'cosine', 
 				print("Ensemble learning enabled")
 				#TODO: include DeepID in ensemble method
 				
-				import lightgbm as lgb #lightgbm==2.3.1
+				import lightgbm as lgb
 				
 				models = {}
 				
@@ -575,8 +578,9 @@ def find(img_path, db_path, model_name ='VGG-Face', distance_metric = 'cosine', 
 						
 			else:
 				raise ValueError("Invalid model_name passed - ", model_name)	
-		else: #model != None
-			print("Already built model is passed")
+		else:
+			pass
+			#print("Already built model is passed")
 			
 			if model_name == 'Ensemble':
 			
